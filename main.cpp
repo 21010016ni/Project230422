@@ -28,10 +28,11 @@ class card
 {
 public:
 	int id;
+	int graph;
 	std::string name;
 	effect ef;
 
-	card(int id, std::string name, effect ef) :id(id), name(name), ef(ef) {}
+	card(int id, std::string name, effect ef) :id(id), graph(-1), name(name), ef(ef) {}
 
 	bool operator<(const card& t)const noexcept { return id < t.id; }
 };
@@ -129,7 +130,7 @@ std::mt19937 mt(std::random_device{}());
 
 const std::vector<effect> effectlist =
 {
-	{0,"相手に{}のダメージ",{5}},
+	{0,"相手に{}のダメージ",{10}},
 	{1,"相手に{}のダメージ+使用の度に与ダメージ{}倍",{4,2}},
 	{2,"相手に毒を{}付与",{8}},
 	{1000,"前に発動した効果と同じ効果を発動する",{}},
@@ -138,9 +139,12 @@ const std::vector<effect> effectlist =
 	{6,"このカード以外の全てのカードの中からランダム発動{}回",{3}},
 	{100,"次に発動する効果に記載された数字を{}倍する",{2}},
 	//{101,"次に使用するカードを{0}回発動する\n次もこのカードだった場合、さらに次のカードを回数*{0}回発動する",{2}},
+	// 防御系の能力があってもいい
+	// そもそも敵が動かないのなんとかしたいね
+	{3,"相手に炎上を{0}付与{1}回",{2,3}},
 };
 
-const std::vector<card> cardlist =
+std::vector<card> cardlist =
 {
 	{0,"こうげき",effectlist[0]},
 	{1,"倍々剣",effectlist[1]},
@@ -151,6 +155,7 @@ const std::vector<card> cardlist =
 	{6,"ゆびをふる",effectlist[6]},
 	{7,"チャージ",effectlist[7]},
 	//{8,"刹那",effectlist[8]},
+	{9,"ブレイズ",effectlist[8]},
 };
 
 duelist player(100);
@@ -204,6 +209,14 @@ void action(effect e)
 		enemy.state["毒"] += e.value[0];
 		popup::push(std::format("毒+{}", e.value[0]), 0xffffff, 320 + std::uniform_int_distribution<>{-15, 15}(mt), 160 + std::uniform_int_distribution<>{-15, 15}(mt), DAMAGE_DURATION, [](int) {return 0; }, [](int t) {return t / 4; });
 		break;
+	case 3:
+		// [敵/n回]炎上(xn)
+		for (int i = 0; i < e.value[1]; ++i)
+		{
+			enemy.state["炎上"] += e.value[0];
+			popup::push(std::format("炎上+{}", e.value[0]), 0xffffff, 320 + std::uniform_int_distribution<>{-15, 15}(mt), 160 + std::uniform_int_distribution<>{-15, 15}(mt), DAMAGE_DURATION, [](int) {return 0; }, [](int t) {return t / 4; });
+		}
+		break;
 	case 4:
 		// 相手の状態変化をn倍し、自分に同じ状態変化を付与する
 		for (auto& i : enemy.state)
@@ -227,10 +240,14 @@ void action(effect e)
 	}
 	break;
 	case 6:
-		// すべてのカードの中からランダム発動n回
-		for (int i = 0; i < e.value[0]; ++i)
+		// このカード以外のカードの中からランダム発動n回
+		for (int i = 0; i < e.value[0];)
 		{
-			action(cardlist[std::uniform_int_distribution<>{0, (int)cardlist.size() - 1}(mt)].ef);
+			auto r = std::uniform_int_distribution<>{ 0, (int)cardlist.size() - 1 }(mt);
+			if (r == 3)
+				continue;
+			action(cardlist[r].ef);
+			++i;
 		}
 		break;
 	}
@@ -258,7 +275,16 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 		return -1;
 
 	SetDrawScreen(DX_SCREEN_BACK);
-	SetFontSize(12);
+	//SetFontSize(12);
+
+	cardlist[0].graph = LoadGraph("data/kougeki.png");
+	cardlist[1].graph = LoadGraph("data/bai.png");
+	cardlist[2].graph = LoadGraph("data/posi.png");
+	cardlist[3].graph = LoadGraph("data/mono.png");
+	cardlist[4].graph = LoadGraph("data/ana.png");
+	cardlist[5].graph = LoadGraph("data/sin.png");
+	cardlist[6].graph = LoadGraph("data/yubi.png");
+	cardlist[7].graph = LoadGraph("data/cha.png");
 
 	std::vector<card> hand;
 
@@ -285,6 +311,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 		{
 			action(hand[select].ef);
 			hand.erase(hand.begin() + select);
+			
+			//switch (std::uniform_int_distribution<>{0, 4}(mt))
+			//{
+			//case 0:
+			//	player.life -= 5;
+			//	break;
+			//}
 		}
 		popup::update();
 
@@ -292,9 +325,22 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
 		DrawString(320, 5, std::format("相手のLife:{}", enemy.life).c_str(), 0xffffff);
 
+		for (int i = 0; i < __min(stack.size(), 5); ++i)
+		{
+			SetDrawBlendMode(DX_BLENDMODE_ALPHA, 255 - i * 48);
+			if (stack[i].value.size() == 0)
+				DrawString(5, 170 + 20 * i, stack[i].lore.c_str(), 0xffffff);
+			else if (stack[i].value.size() == 1)
+				DrawString(5, 170 + 20 * i, std::vformat(stack[i].lore, std::make_format_args(stack[i].value[0])).c_str(), 0xffffff);
+			else if (stack[i].value.size() == 2)
+				DrawString(5, 170 + 20 * i, std::vformat(stack[i].lore, std::make_format_args(stack[i].value[0], stack[i].value[1])).c_str(), 0xffffff);
+		}
+		SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
 		for (int i = 0; i < hand.size(); ++i)
 		{
-			DrawBox(20 + i * cardsizex, 300, 20 + (i + 1) * cardsizex, 300 + cardsizey, 0xffffff, FALSE);
+			DrawGraph(20 + i * cardsizex, 300, hand[i].graph, FALSE);
+			DrawBox(20 + i * cardsizex, 300, 20 + (i + 1) * cardsizex, 300 + cardsizey, 0xdddddd, FALSE);
 			DrawString(22 + i * cardsizex, 302, hand[i].name.c_str(), 0xffffff);
 			if (i == select)
 			{
